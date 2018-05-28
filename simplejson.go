@@ -1,9 +1,13 @@
 package simplejson
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
+	"reflect"
+	"strconv"
 )
 
 // returns the current implementation version
@@ -56,7 +60,7 @@ func (j *Json) MarshalJSON() ([]byte, error) {
 // Set modifies `Json` map by `key` and `value`
 // Useful for changing single key/value in a `Json` object easily.
 func (j *Json) Set(key string, val interface{}) {
-	m, err := j.Map()
+	m, err := j.MapInterface()
 	if err != nil {
 		return
 	}
@@ -104,7 +108,7 @@ func (j *Json) SetPath(branch []string, val interface{}) {
 
 // Del modifies `Json` map by deleting `key` if it is present.
 func (j *Json) Del(key string) {
-	m, err := j.Map()
+	m, err := j.MapInterface()
 	if err != nil {
 		return
 	}
@@ -117,13 +121,13 @@ func (j *Json) Del(key string) {
 // useful for chaining operations (to traverse a nested JSON):
 //    js.Get("top_level").Get("dict").Get("value").Int()
 func (j *Json) Get(key string) *Json {
-	m, err := j.Map()
+	m, err := j.MapInterface()
 	if err == nil {
 		if val, ok := m[key]; ok {
 			return &Json{val}
 		}
 	}
-	return &Json{nil}
+	return &Json{}
 }
 
 // GetPath searches for the item as specified by the branch
@@ -145,7 +149,7 @@ func (j *Json) GetPath(branch ...string) *Json {
 // a json array instead of a json object:
 //    js.Get("top_level").Get("array").GetIndex(1).Get("key").Int()
 func (j *Json) GetIndex(index int) *Json {
-	a, err := j.Array()
+	a, err := j.ArrayInterface()
 	if err == nil {
 		if len(a) > index {
 			return &Json{a[index]}
@@ -162,7 +166,7 @@ func (j *Json) GetIndex(index int) *Json {
 //        log.Println(data)
 //    }
 func (j *Json) CheckGet(key string) (*Json, bool) {
-	m, err := j.Map()
+	m, err := j.MapInterface()
 	if err == nil {
 		if val, ok := m[key]; ok {
 			return &Json{val}, true
@@ -171,16 +175,30 @@ func (j *Json) CheckGet(key string) (*Json, bool) {
 	return nil, false
 }
 
-// Map type asserts to `map`
-func (j *Json) Map() (map[string]interface{}, error) {
+func (j *Json) MapInterface() (map[string]interface{}, error) {
 	if m, ok := (j.data).(map[string]interface{}); ok {
 		return m, nil
 	}
 	return nil, errors.New("type assertion to map[string]interface{} failed")
 }
 
+// Map type asserts to `map`
+func (j *Json) Map() (map[string]*Json, error) {
+	if m, ok := (j.data).(map[string]*Json); ok {
+		return m, nil
+	}
+	return nil, errors.New("type assertion to map[string]*Json failed")
+}
+
 // Array type asserts to an `array`
-func (j *Json) Array() ([]interface{}, error) {
+func (j *Json) Array() ([]*Json, error) {
+	if a, ok := (j.data).([]*Json); ok {
+		return a, nil
+	}
+	return nil, errors.New("type assertion to []*Json failed")
+}
+
+func (j *Json) ArrayInterface() ([]interface{}, error) {
 	if a, ok := (j.data).([]interface{}); ok {
 		return a, nil
 	}
@@ -213,7 +231,7 @@ func (j *Json) Bytes() ([]byte, error) {
 
 // StringArray type asserts to an `array` of `string`
 func (j *Json) StringArray() ([]string, error) {
-	arr, err := j.Array()
+	arr, err := j.ArrayInterface()
 	if err != nil {
 		return nil, err
 	}
@@ -232,61 +250,43 @@ func (j *Json) StringArray() ([]string, error) {
 	return retArr, nil
 }
 
-// MustArray guarantees the return of a `[]interface{}` (with optional default)
+// GetArray guarantees the return of a `[]*Json`
 //
 // useful when you want to interate over array values in a succinct manner:
-//		for i, v := range js.Get("results").MustArray() {
+//		for i, v := range js.Get("results").GetArray() {
 //			fmt.Println(i, v)
 //		}
-func (j *Json) MustArray(args ...[]interface{}) []interface{} {
-	var def []interface{}
-
-	switch len(args) {
-	case 0:
-	case 1:
-		def = args[0]
-	default:
-		log.Panicf("MustArray() received too many arguments %d", len(args))
-	}
+func (j *Json) GetArray() []*Json {
 
 	a, err := j.Array()
 	if err == nil {
 		return a
 	}
 
-	return def
+	return []*Json{}
 }
 
-// MustMap guarantees the return of a `map[string]interface{}` (with optional default)
+// GetMap guarantees the return of a `map[string]*Json`
 //
 // useful when you want to interate over map values in a succinct manner:
-//		for k, v := range js.Get("dictionary").MustMap() {
+//		for k, v := range js.Get("dictionary").GetMap() {
 //			fmt.Println(k, v)
 //		}
-func (j *Json) MustMap(args ...map[string]interface{}) map[string]interface{} {
-	var def map[string]interface{}
-
-	switch len(args) {
-	case 0:
-	case 1:
-		def = args[0]
-	default:
-		log.Panicf("MustMap() received too many arguments %d", len(args))
-	}
+func (j *Json) GetMap() map[string]*Json {
 
 	a, err := j.Map()
 	if err == nil {
 		return a
 	}
 
-	return def
+	return map[string]*Json{}
 }
 
-// MustString guarantees the return of a `string` (with optional default)
+// GetString guarantees the return of a `string` (with optional default)
 //
 // useful when you explicitly want a `string` in a single value return context:
-//     myFunc(js.Get("param1").MustString(), js.Get("optional_param").MustString("my_default"))
-func (j *Json) MustString(args ...string) string {
+//     myFunc(js.Get("param1").GetString(), js.Get("optional_param").GetString("my_default"))
+func (j *Json) GetString(args ...string) string {
 	var def string
 
 	switch len(args) {
@@ -294,7 +294,7 @@ func (j *Json) MustString(args ...string) string {
 	case 1:
 		def = args[0]
 	default:
-		log.Panicf("MustString() received too many arguments %d", len(args))
+		log.Panicf("GetString() received too many arguments %d", len(args))
 	}
 
 	s, err := j.String()
@@ -305,13 +305,13 @@ func (j *Json) MustString(args ...string) string {
 	return def
 }
 
-// MustStringArray guarantees the return of a `[]string` (with optional default)
+// GetStringArray guarantees the return of a `[]string` (with optional default)
 //
 // useful when you want to interate over array values in a succinct manner:
-//		for i, s := range js.Get("results").MustStringArray() {
+//		for i, s := range js.Get("results").GetStringArray() {
 //			fmt.Println(i, s)
 //		}
-func (j *Json) MustStringArray(args ...[]string) []string {
+func (j *Json) GetStringArray(args ...[]string) []string {
 	var def []string
 
 	switch len(args) {
@@ -319,7 +319,7 @@ func (j *Json) MustStringArray(args ...[]string) []string {
 	case 1:
 		def = args[0]
 	default:
-		log.Panicf("MustStringArray() received too many arguments %d", len(args))
+		log.Panicf("GetStringArray() received too many arguments %d", len(args))
 	}
 
 	a, err := j.StringArray()
@@ -330,11 +330,11 @@ func (j *Json) MustStringArray(args ...[]string) []string {
 	return def
 }
 
-// MustInt guarantees the return of an `int` (with optional default)
+// GetInt guarantees the return of an `int` (with optional default)
 //
 // useful when you explicitly want an `int` in a single value return context:
-//     myFunc(js.Get("param1").MustInt(), js.Get("optional_param").MustInt(5150))
-func (j *Json) MustInt(args ...int) int {
+//     myFunc(js.Get("param1").GetInt(), js.Get("optional_param").GetInt(5150))
+func (j *Json) GetInt(args ...int) int {
 	var def int
 
 	switch len(args) {
@@ -342,7 +342,7 @@ func (j *Json) MustInt(args ...int) int {
 	case 1:
 		def = args[0]
 	default:
-		log.Panicf("MustInt() received too many arguments %d", len(args))
+		log.Panicf("GetInt() received too many arguments %d", len(args))
 	}
 
 	i, err := j.Int()
@@ -353,11 +353,11 @@ func (j *Json) MustInt(args ...int) int {
 	return def
 }
 
-// MustFloat64 guarantees the return of a `float64` (with optional default)
+// GetFloat64 guarantees the return of a `float64` (with optional default)
 //
 // useful when you explicitly want a `float64` in a single value return context:
-//     myFunc(js.Get("param1").MustFloat64(), js.Get("optional_param").MustFloat64(5.150))
-func (j *Json) MustFloat64(args ...float64) float64 {
+//     myFunc(js.Get("param1").GetFloat64(), js.Get("optional_param").GetFloat64(5.150))
+func (j *Json) GetFloat64(args ...float64) float64 {
 	var def float64
 
 	switch len(args) {
@@ -365,7 +365,7 @@ func (j *Json) MustFloat64(args ...float64) float64 {
 	case 1:
 		def = args[0]
 	default:
-		log.Panicf("MustFloat64() received too many arguments %d", len(args))
+		log.Panicf("GetFloat64() received too many arguments %d", len(args))
 	}
 
 	f, err := j.Float64()
@@ -376,11 +376,11 @@ func (j *Json) MustFloat64(args ...float64) float64 {
 	return def
 }
 
-// MustBool guarantees the return of a `bool` (with optional default)
+// GetBool guarantees the return of a `bool` (with optional default)
 //
 // useful when you explicitly want a `bool` in a single value return context:
-//     myFunc(js.Get("param1").MustBool(), js.Get("optional_param").MustBool(true))
-func (j *Json) MustBool(args ...bool) bool {
+//     myFunc(js.Get("param1").GetBool(), js.Get("optional_param").GetBool(true))
+func (j *Json) GetBool(args ...bool) bool {
 	var def bool
 
 	switch len(args) {
@@ -388,7 +388,7 @@ func (j *Json) MustBool(args ...bool) bool {
 	case 1:
 		def = args[0]
 	default:
-		log.Panicf("MustBool() received too many arguments %d", len(args))
+		log.Panicf("GetBool() received too many arguments %d", len(args))
 	}
 
 	b, err := j.Bool()
@@ -399,11 +399,11 @@ func (j *Json) MustBool(args ...bool) bool {
 	return def
 }
 
-// MustInt64 guarantees the return of an `int64` (with optional default)
+// GetInt64 guarantees the return of an `int64` (with optional default)
 //
 // useful when you explicitly want an `int64` in a single value return context:
-//     myFunc(js.Get("param1").MustInt64(), js.Get("optional_param").MustInt64(5150))
-func (j *Json) MustInt64(args ...int64) int64 {
+//     myFunc(js.Get("param1").GetInt64(), js.Get("optional_param").GetInt64(5150))
+func (j *Json) GetInt64(args ...int64) int64 {
 	var def int64
 
 	switch len(args) {
@@ -411,7 +411,7 @@ func (j *Json) MustInt64(args ...int64) int64 {
 	case 1:
 		def = args[0]
 	default:
-		log.Panicf("MustInt64() received too many arguments %d", len(args))
+		log.Panicf("GetInt64() received too many arguments %d", len(args))
 	}
 
 	i, err := j.Int64()
@@ -422,11 +422,11 @@ func (j *Json) MustInt64(args ...int64) int64 {
 	return def
 }
 
-// MustUInt64 guarantees the return of an `uint64` (with optional default)
+// GetUInt64 guarantees the return of an `uint64` (with optional default)
 //
 // useful when you explicitly want an `uint64` in a single value return context:
-//     myFunc(js.Get("param1").MustUint64(), js.Get("optional_param").MustUint64(5150))
-func (j *Json) MustUint64(args ...uint64) uint64 {
+//     myFunc(js.Get("param1").GetUint64(), js.Get("optional_param").GetUint64(5150))
+func (j *Json) GetUint64(args ...uint64) uint64 {
 	var def uint64
 
 	switch len(args) {
@@ -434,7 +434,7 @@ func (j *Json) MustUint64(args ...uint64) uint64 {
 	case 1:
 		def = args[0]
 	default:
-		log.Panicf("MustUint64() received too many arguments %d", len(args))
+		log.Panicf("GetUint64() received too many arguments %d", len(args))
 	}
 
 	i, err := j.Uint64()
@@ -443,4 +443,81 @@ func (j *Json) MustUint64(args ...uint64) uint64 {
 	}
 
 	return def
+}
+
+// Implements the json.Unmarshaler interface.
+func (j *Json) UnmarshalJSON(p []byte) error {
+	dec := json.NewDecoder(bytes.NewBuffer(p))
+	dec.UseNumber()
+	return dec.Decode(&j.data)
+}
+
+// NewFromReader returns a *Json by decoding from an io.Reader
+func NewFromReader(r io.Reader) (*Json, error) {
+	j := new(Json)
+	dec := json.NewDecoder(r)
+	dec.UseNumber()
+	err := dec.Decode(&j.data)
+	return j, err
+}
+
+// Float64 coerces into a float64
+func (j *Json) Float64() (float64, error) {
+	switch j.data.(type) {
+	case json.Number:
+		return j.data.(json.Number).Float64()
+	case float32, float64:
+		return reflect.ValueOf(j.data).Float(), nil
+	case int, int8, int16, int32, int64:
+		return float64(reflect.ValueOf(j.data).Int()), nil
+	case uint, uint8, uint16, uint32, uint64:
+		return float64(reflect.ValueOf(j.data).Uint()), nil
+	}
+	return 0, errors.New("invalid value type")
+}
+
+// Int coerces into an int
+func (j *Json) Int() (int, error) {
+	switch j.data.(type) {
+	case json.Number:
+		i, err := j.data.(json.Number).Int64()
+		return int(i), err
+	case float32, float64:
+		return int(reflect.ValueOf(j.data).Float()), nil
+	case int, int8, int16, int32, int64:
+		return int(reflect.ValueOf(j.data).Int()), nil
+	case uint, uint8, uint16, uint32, uint64:
+		return int(reflect.ValueOf(j.data).Uint()), nil
+	}
+	return 0, errors.New("invalid value type")
+}
+
+// Int64 coerces into an int64
+func (j *Json) Int64() (int64, error) {
+	switch j.data.(type) {
+	case json.Number:
+		return j.data.(json.Number).Int64()
+	case float32, float64:
+		return int64(reflect.ValueOf(j.data).Float()), nil
+	case int, int8, int16, int32, int64:
+		return reflect.ValueOf(j.data).Int(), nil
+	case uint, uint8, uint16, uint32, uint64:
+		return int64(reflect.ValueOf(j.data).Uint()), nil
+	}
+	return 0, errors.New("invalid value type")
+}
+
+// Uint64 coerces into an uint64
+func (j *Json) Uint64() (uint64, error) {
+	switch j.data.(type) {
+	case json.Number:
+		return strconv.ParseUint(j.data.(json.Number).String(), 10, 64)
+	case float32, float64:
+		return uint64(reflect.ValueOf(j.data).Float()), nil
+	case int, int8, int16, int32, int64:
+		return uint64(reflect.ValueOf(j.data).Int()), nil
+	case uint, uint8, uint16, uint32, uint64:
+		return reflect.ValueOf(j.data).Uint(), nil
+	}
+	return 0, errors.New("invalid value type")
 }

@@ -1,13 +1,10 @@
-### go-simplejson
+# simplejson
 
-a Go package to interact with arbitrary JSON
+A Go package to interact with arbitrary JSON. Forked from bitly/go-simplejson.
 
-[![Build Status](https://secure.travis-ci.org/bitly/go-simplejson.png)](http://travis-ci.org/bitly/go-simplejson)
+Solves the following issues from the original library:
 
-### Importing
+- #25 (return *Json instead of interface{})
 
-    import github.com/bitly/go-simplejson
+- #15 (rename Must* methods)
 
-### Documentation
-
-Visit the docs on [gopkgdoc](http://godoc.org/github.com/bitly/go-simplejson)
