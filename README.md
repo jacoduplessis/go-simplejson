@@ -8,3 +8,5 @@ Solves the following issues from the original library:
 
 - #15 (rename Must* methods)
 
+See [docs](https://godoc.org/github.com/jacoduplessis/simplejson) for usage.
+
