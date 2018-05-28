@@ -192,10 +192,14 @@ func (j *Json) Map() (map[string]*Json, error) {
 
 // Array type asserts to an `array`
 func (j *Json) Array() ([]*Json, error) {
-	if a, ok := (j.data).([]*Json); ok {
-		return a, nil
+	if a, ok := (j.data).([]interface{}); ok {
+		jArr := make([]*Json, 0, len(a))
+		for _, e := range a {
+			jArr = append(jArr, &Json{data: e})
+		}
+		return jArr, nil
 	}
-	return nil, errors.New("type assertion to []*Json failed")
+	return nil, errors.New("type assertion to array failed")
 }
 
 func (j *Json) ArrayInterface() ([]interface{}, error) {

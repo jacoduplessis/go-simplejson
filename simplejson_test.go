@@ -35,8 +35,12 @@ func TestSimplejson(t *testing.T) {
 	_, ok = js.CheckGet("missing_key")
 	assert.Equal(t, false, ok)
 
+	getix := js.Get("test").Get("string_array").GetIndex(1).GetString()
+	assert.Equal(t, "ghjk", getix)
+
 	aws := js.Get("test").Get("arraywithsubs")
 	assert.NotEqual(t, nil, aws)
+
 	var awsval int
 	awsval, _ = aws.GetIndex(0).Get("subkeyone").Int()
 	assert.Equal(t, 1, awsval)
@@ -59,6 +63,9 @@ func TestSimplejson(t *testing.T) {
 
 	mi := js.Get("test").Get("int").GetInt()
 	assert.Equal(t, 10, mi)
+
+	arr := js.Get("test").Get("array").GetArray()
+	assert.Equal(t, 3, len(arr))
 
 	mi2 := js.Get("test").Get("missing_int").GetInt(5150)
 	assert.Equal(t, 5150, mi2)
